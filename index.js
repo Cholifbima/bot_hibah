@@ -4,7 +4,38 @@ const express = require('express');
 const cors = require('cors');
 const qrcode = require('qrcode');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
+
+let whitelist = [];
+const WHITELIST_FILE = path.join(__dirname, 'whitelist.json');
+try {
+    if (fs.existsSync(WHITELIST_FILE)) {
+        whitelist = JSON.parse(fs.readFileSync(WHITELIST_FILE, 'utf-8'));
+    } else {
+        fs.writeFileSync(WHITELIST_FILE, '[]');
+    }
+} catch (e) {
+    console.error('Failed to load whitelist:', e);
+}
+
+function saveWhitelist() {
+    fs.writeFileSync(WHITELIST_FILE, JSON.stringify(whitelist, null, 2));
+}
+
+function addToWhitelist(number) {
+    let formatted = number.replace(/\D/g, '');
+    if (formatted.startsWith('0')) formatted = '62' + formatted.substring(1);
+    if (!whitelist.includes(formatted)) {
+        whitelist.push(formatted);
+        saveWhitelist();
+    }
+}
+
+// Otomatis masukkan owner ke whitelist
+if (process.env.OWNER_WA_NUMBER) {
+    addToWhitelist(process.env.OWNER_WA_NUMBER);
+}
 
 const app = express();
 app.use(cors());
@@ -74,6 +105,11 @@ routes.post('/api/send-message', async (req, res) => {
             formattedNumber = '62' + formattedNumber.substring(1);
         }
         
+        if (!whitelist.includes(formattedNumber)) {
+            console.warn(`[Blocked] Mencoba mengirim ke ${formattedNumber} tapi nomor belum DM bot.`);
+            return res.status(400).json({ error: 'Pengguna harus DM bot terlebih dahulu untuk mencegah banned.' });
+        }
+        
         const jid = formattedNumber + '@s.whatsapp.net';
 
         await sock.sendMessage(jid, { text: message });
@@ -101,6 +137,16 @@ async function connectToWhatsApp() {
     });
 
     sock.ev.on('creds.update', saveCreds);
+
+    // Tangkap pesan masuk dan catat nomor pengirim ke whitelist
+    sock.ev.on('messages.upsert', async (m) => {
+        const msg = m.messages[0];
+        if (!msg.key.fromMe && msg.key.remoteJid && !msg.key.remoteJid.includes('@g.us')) {
+            const senderNumber = msg.key.remoteJid.split('@')[0];
+            addToWhitelist(senderNumber);
+            console.log(`[Whitelist] Nomor ${senderNumber} berhasil ditambahkan ke whitelist.`);
+        }
+    });
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
