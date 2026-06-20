@@ -105,7 +105,8 @@ routes.post('/api/send-message', async (req, res) => {
             formattedNumber = '62' + formattedNumber.substring(1);
         }
         
-        if (!whitelist.includes(formattedNumber)) {
+        // Cek whitelist kecuali jika dikirim dengan flag isOwner = true
+        if (!req.body.isOwner && !whitelist.includes(formattedNumber)) {
             console.warn(`[Blocked] Mencoba mengirim ke ${formattedNumber} tapi nomor belum DM bot.`);
             return res.status(400).json({ error: 'Pengguna harus DM bot terlebih dahulu untuk mencegah banned.' });
         }
