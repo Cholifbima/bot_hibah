@@ -8,6 +8,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get('/', (req, res) => res.redirect('/qr'));
+
 const PORT = process.env.PORT || 80;
 
 let sock = null;
