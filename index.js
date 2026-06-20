@@ -2,7 +2,8 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = requi
 const pino = require('pino');
 const express = require('express');
 const cors = require('cors');
-const qrcode = require('qrcode'); // Tambahan untuk QR Code
+const qrcode = require('qrcode');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -12,18 +13,15 @@ app.use(express.json());
 const PORT = process.env.PORT || 80;
 
 let sock = null;
-let currentQR = null; // Menyimpan status QR terakhir
+let currentQR = null;
 let isConnected = false;
 
-// Membuat router agar support subfolder cPanel (misal /botwa)
 const routes = express.Router();
 
 routes.get('/', (req, res) => {
-    // Redirect ke /qr (menambahkan baseUrl agar support subfolder)
     res.redirect((req.baseUrl || '') + '/qr');
 });
 
-// 🌐 ENDPOINT BARU: Menampilkan QR code di browser
 routes.get('/qr', (req, res) => {
     if (isConnected) {
         return res.send('<h2 style="text-align:center; margin-top:20vh; font-family:sans-serif; color:green;">✅ Bot WhatsApp sudah terhubung! Tidak perlu scan QR.</h2>');
@@ -40,11 +38,10 @@ routes.get('/qr', (req, res) => {
             </div>
         `);
     } else {
-        res.send('<h2 style="text-align:center; margin-top:20vh; font-family:sans-serif;">⏳ Loading QR Code... Silakan refresh beberapa detik lagi.</h2>');
+        res.send('<h2 style="text-align:center; margin-top:20vh; font-family:sans-serif;">⏳ Sedang menyiapkan WhatsApp... Silakan refresh halaman ini 10 detik lagi.</h2>');
     }
 });
 
-// Endpoint internal untuk menerima perintah kirim pesan dari Backend utama
 routes.post('/api/send-message', async (req, res) => {
     try {
         const { secretKey, number, message } = req.body;
@@ -57,8 +54,19 @@ routes.post('/api/send-message', async (req, res) => {
             return res.status(400).json({ error: 'Number dan message wajib diisi' });
         }
 
-        if (!sock || !isConnected) {
-            return res.status(500).json({ error: 'WhatsApp client belum siap' });
+        if (!sock) {
+            return res.status(500).json({ error: 'WhatsApp client belum siap. Coba lagi dalam beberapa detik.' });
+        }
+
+        // Tunggu maksimal 10 detik jika bot sedang dalam proses koneksi ulang (waking up dari cPanel)
+        let retries = 0;
+        while (!isConnected && retries < 10) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            retries++;
+        }
+
+        if (!isConnected) {
+            return res.status(500).json({ error: 'WhatsApp sedang terputus atau mencoba reconnect. Coba sesaat lagi.' });
         }
 
         let formattedNumber = number.replace(/\D/g, '');
@@ -77,29 +85,28 @@ routes.post('/api/send-message', async (req, res) => {
     }
 });
 
-// Pasang router di dua path (agar jalan normal maupun di dalam cPanel botwa)
 app.use('/', routes);
 app.use('/botwa', routes);
 
 async function connectToWhatsApp() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    // Memastikan folder auth berada di tempat yang benar dan tidak berpindah
+    const authFolder = path.join(__dirname, 'auth_info_baileys');
+    const { state, saveCreds } = await useMultiFileAuthState(authFolder);
 
     sock = makeWASocket({
         auth: state,
         printQRInTerminal: true,
-        logger: pino({ level: 'silent' }), // Ganti ke 'info' jika butuh logs
+        logger: pino({ level: 'silent' }),
         browser: ['TopAssist Bot', 'Chrome', '1.0.0']
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Event saat butuh scan QR atau koneksi berhasil
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
         if(qr) {
             console.log('\n=== SCAN QR CODE INI UNTUK LOGIN WHATSAPP BOT ===\n');
-            // Generate QR Code menjadi data URL (Base64) agar bisa tampil di browser
             currentQR = await qrcode.toDataURL(qr);
         }
 
@@ -109,14 +116,14 @@ async function connectToWhatsApp() {
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log('Connection closed due to ', lastDisconnect.error, ', reconnecting ', shouldReconnect);
             if(shouldReconnect) {
-                connectToWhatsApp();
+                setTimeout(connectToWhatsApp, 3000); // Beri jeda sedikit sebelum reconnect agar tidak spam
             } else {
                 console.log('Session dihapus. Hapus folder auth_info_baileys dan jalankan ulang untuk scan QR.');
             }
         } else if(connection === 'open') {
             isConnected = true;
-            currentQR = null; // Hapus QR karena sudah terhubung
-            console.log('WA Bot Terhubung!');
+            currentQR = null;
+            console.log('✅ WA Bot Terhubung Permanen!');
         }
     });
 }
