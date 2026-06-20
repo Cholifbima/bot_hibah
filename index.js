@@ -181,7 +181,8 @@ async function connectToWhatsApp() {
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.key.fromMe && msg.key.remoteJid && !msg.key.remoteJid.includes('@g.us')) {
-            const senderNumber = msg.key.remoteJid.split('@')[0];
+            // Fix: Hilangkan device ID dari JID (contoh: 6281234:5@s.whatsapp.net -> 6281234)
+            const senderNumber = msg.key.remoteJid.split('@')[0].split(':')[0];
             const messageContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
             
             // Cek apakah pesan mengandung template aktivasi dari web
