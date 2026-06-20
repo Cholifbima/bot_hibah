@@ -8,6 +8,13 @@ const fs = require('fs');
 require('dotenv').config();
 
 let whitelist = [];
+const messageLogs = []; // Array untuk menyimpan log pengiriman
+
+function addLog(status, to, messageStr) {
+    const timestamp = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    messageLogs.unshift({ timestamp, status, to, message: messageStr });
+    if (messageLogs.length > 50) messageLogs.pop(); // Batasi hanya 50 log terbaru
+}
 const WHITELIST_FILE = path.join(__dirname, 'whitelist.json');
 try {
     if (fs.existsSync(WHITELIST_FILE)) {
@@ -20,7 +27,11 @@ try {
 }
 
 function saveWhitelist() {
-    fs.writeFileSync(WHITELIST_FILE, JSON.stringify(whitelist, null, 2));
+    try {
+        fs.writeFileSync(WHITELIST_FILE, JSON.stringify(whitelist, null, 2));
+    } catch (e) {
+        console.error('Failed to write whitelist.json:', e);
+    }
 }
 
 function addToWhitelist(number) {
@@ -73,6 +84,29 @@ routes.get('/qr', (req, res) => {
     }
 });
 
+routes.get('/logs', (req, res) => {
+    let html = '<h2 style="font-family:sans-serif;">Log Pengiriman Bot WA (50 Terakhir)</h2>';
+    html += '<table border="1" cellpadding="8" style="border-collapse: collapse; font-family:sans-serif; width:100%;">';
+    html += '<tr style="background:#f0f0f0;"><th>Waktu</th><th>Status</th><th>Tujuan</th><th>Pesan</th></tr>';
+    
+    if (messageLogs.length === 0) {
+        html += '<tr><td colspan="4" style="text-align:center;">Belum ada log aktivitas.</td></tr>';
+    } else {
+        messageLogs.forEach(log => {
+            const color = log.status === 'SUCCESS' ? 'green' : log.status === 'ERROR' ? 'red' : 'orange';
+            html += `<tr>
+                <td style="white-space:nowrap;">${log.timestamp}</td>
+                <td style="color:${color}; font-weight:bold;">${log.status}</td>
+                <td style="white-space:nowrap;">${log.to}</td>
+                <td><pre style="margin:0; white-space:pre-wrap; font-size:12px; font-family:monospace;">${log.message}</pre></td>
+            </tr>`;
+        });
+    }
+    html += '</table>';
+    html += '<p style="font-family:sans-serif; margin-top:20px;"><a href="/qr">Lihat Status Bot</a> | <a href="/logs">Refresh Logs</a></p>';
+    res.send(html);
+});
+
 routes.post('/api/send-message', async (req, res) => {
     try {
         const { secretKey, number, message } = req.body;
@@ -108,6 +142,7 @@ routes.post('/api/send-message', async (req, res) => {
         // Cek whitelist kecuali jika dikirim dengan flag isOwner = true
         if (!req.body.isOwner && !whitelist.includes(formattedNumber)) {
             console.warn(`[Blocked] Mencoba mengirim ke ${formattedNumber} tapi nomor belum DM bot.`);
+            addLog('BLOCKED (No DM/Whitelist)', formattedNumber, message);
             return res.status(400).json({ error: 'Pengguna harus DM bot terlebih dahulu untuk mencegah banned.' });
         }
         
@@ -115,9 +150,11 @@ routes.post('/api/send-message', async (req, res) => {
 
         await sock.sendMessage(jid, { text: message });
 
+        addLog('SUCCESS', formattedNumber, message);
         res.json({ success: true, message: 'Pesan berhasil dikirim ke ' + formattedNumber });
     } catch (error) {
         console.error('Send message error:', error);
+        addLog('ERROR', req.body.number, String(error));
         res.status(500).json({ error: 'Gagal mengirim pesan' });
     }
 });
