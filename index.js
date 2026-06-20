@@ -177,13 +177,24 @@ async function connectToWhatsApp() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Tangkap pesan masuk dan catat nomor pengirim ke whitelist
+    // Tangkap pesan masuk dan catat nomor pengirim ke whitelist HANYA JIKA sesuai template
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.key.fromMe && msg.key.remoteJid && !msg.key.remoteJid.includes('@g.us')) {
             const senderNumber = msg.key.remoteJid.split('@')[0];
-            addToWhitelist(senderNumber);
-            console.log(`[Whitelist] Nomor ${senderNumber} berhasil ditambahkan ke whitelist.`);
+            const messageContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
+            
+            // Cek apakah pesan mengandung template aktivasi dari web
+            if (messageContent.includes('Halo TopAssist! Tolong aktifkan notifikasi otomatis')) {
+                addToWhitelist(senderNumber);
+                console.log(`[Whitelist] Nomor ${senderNumber} berhasil ditambahkan ke whitelist karena sesuai template.`);
+                
+                // Balas otomatis
+                const replyText = `✅ *Notifikasi Berhasil Diaktifkan!*\n\nHalo! Nomor WA Anda telah tersambung dengan sistem TopAssist. Anda akan menerima pembaruan status pesanan secara otomatis.\n\n_Terima kasih telah berbelanja di TopAssist!_`;
+                await sock.sendMessage(msg.key.remoteJid, { text: replyText });
+            } else {
+                console.log(`[Ignored] Pesan dari ${senderNumber} diabaikan karena tidak sesuai template aktivasi.`);
+            }
         }
     });
 
