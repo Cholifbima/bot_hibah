@@ -139,10 +139,12 @@ routes.post('/api/send-message', async (req, res) => {
             formattedNumber = '62' + formattedNumber.substring(1);
         }
         
-        // Sistem Whitelist dinonaktifkan sementara karena isu cPanel sleep (Bot telat menerima DM saat tertidur)
+        // Sistem Whitelist diaktifkan KEMBALI sesuai permintaan agar tidak kena Banned Meta.
+        // Jika cPanel tertidur, pastikan bot dibangunkan menggunakan cron-job.org
         if (!req.body.isOwner && !whitelist.includes(formattedNumber)) {
-            console.warn(`[Warning] Mengirim ke ${formattedNumber} yang belum DM bot (cPanel Sleep issue).`);
-            addLog('WARNING (No DM)', formattedNumber, message);
+            console.warn(`[Blocked] Mencoba mengirim ke ${formattedNumber} tapi nomor belum DM bot.`);
+            addLog('BLOCKED (No DM/Whitelist)', formattedNumber, message);
+            return res.status(400).json({ error: 'Pengguna harus DM bot terlebih dahulu untuk mencegah banned.' });
         }
         
         const jid = formattedNumber + '@s.whatsapp.net';
